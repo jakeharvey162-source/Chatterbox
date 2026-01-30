@@ -1,0 +1,58 @@
+import streamlit as st
+import torch
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
+st.set_page_config(page_title="ChatGPT Mini", page_icon="🤖")
+st.title("💬 ChatGPT Mini (Hugging Face)")
+
+# --- Load model & tokenizer ---
+@st.cache_resource(show_spinner=True)
+def load_model():
+    model_name = "distilgpt2"  # smaller GPT model to fit free Hugging Face runtime
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    model = AutoModelForCausalLM.from_pretrained(model_name)
+    tokenizer.pad_token = tokenizer.eos_token
+    return model, tokenizer
+
+model, tokenizer = load_model()
+
+# --- Initialize session ---
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
+if "chat_history_ids" not in st.session_state:
+    st.session_state.chat_history_ids = None
+
+# --- Display chat history ---
+for msg in st.session_state.messages:
+    with st.chat_message(msg["role"]):
+        st.write(msg["content"])
+
+# --- User input ---
+if prompt := st.chat_input("Say something..."):
+    with st.chat_message("user"):
+        st.write(prompt)
+    st.session_state.messages.append({"role": "user", "content": prompt})
+
+    # Encode user input
+    new_input_ids = tokenizer.encode(prompt + tokenizer.eos_token, return_tensors="pt")
+    bot_input_ids = new_input_ids if st.session_state.chat_history_ids is None else torch.cat([st.session_state.chat_history_ids, new_input_ids], dim=-1)
+
+    # Generate response
+    with st.spinner("Bot is thinking..."):
+        outputs = model.generate(
+            bot_input_ids,
+            max_length=150,
+            pad_token_id=tokenizer.eos_token_id,
+            do_sample=True,
+            temperature=0.7,
+            top_k=50,
+            top_p=0.9
+        )
+
+    st.session_state.chat_history_ids = outputs
+    response = tokenizer.decode(outputs[:, bot_input_ids.shape[-1]:][0], skip_special_tokens=True)
+
+    with st.chat_message("bot"):
+        st.write(response)
+    st.session_state.messages.append({"role": "bot", "content": response})
